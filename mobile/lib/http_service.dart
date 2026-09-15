@@ -13,6 +13,16 @@ class HttpService {
     }
   }
 
+  static Future<Map<String, dynamic>> getPostById(int id) async {
+    final response = await http.get(Uri.parse('$baseUrl/posts/$id'));
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      return decoded is Map<String, dynamic> ? decoded : {'data': decoded};
+    } else {
+      throw Exception('Gagal memuat detail artikel');
+    }
+  }
+
   static Future<void> createPost(String title, String content, int categoryId) async {
     final response = await http.post(
       Uri.parse('$baseUrl/posts'),

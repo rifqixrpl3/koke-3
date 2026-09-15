@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'form_page.dart';
 import 'http_service.dart';
+import 'form_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -10,145 +10,138 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  List<dynamic> _posts = [];
-  bool _isLoading = true;
+  late Future<List<dynamic>> futurePosts;
 
   @override
   void initState() {
     super.initState();
-    _fetchPosts();
+    futurePosts = HttpService.getPosts();
   }
 
-  Future<void> _fetchPosts() async {
-    setState(() => _isLoading = true);
-    try {
-      final data = await HttpService.getPosts();
-      setState(() {
-        _posts = data;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal mengambil data: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
-  Future<void> _deletePost(int id) async {
-    final success = await HttpService.deletePost(id);
-    if (success) {
-      _fetchPosts();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Artikel berhasil dihapus'), backgroundColor: Colors.green),
-        );
-      }
-    }
+  void _refreshData() {
+    setState(() {
+      futurePosts = HttpService.getPosts();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Blog App')),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _posts.isEmpty
-              ? const Center(child: Text('Belum ada artikel', style: TextStyle(color: Colors.grey)))
-              : RefreshIndicator(
-                  onRefresh: _fetchPosts,
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _posts.length,
-                    separatorBuilder: (context, index) => const Divider(color: Color(0xFF222222)),
-                    itemBuilder: (context, index) {
-                      final item = _posts[index];
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          item['title'] ?? '',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 4),
-                            Text(item['content'] ?? '', style: const TextStyle(color: Colors.grey)),
-                            const SizedBox(height: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: Colors.blueGrey[800],
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                item['category_name'] ?? 'Umum',
-                                style: const TextStyle(color: Colors.white, fontSize: 10),
-                              ),
+      appBar: AppBar(
+        title: const Text('Blog App - ATS'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+          ),
+        ],
+      ),
+      body: FutureBuilder<List<dynamic>>(
+        future: futurePosts,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          } else if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return const Center(child: Text('Tidak ada data artikel.'));
+          }
+
+          final posts = snapshot.data!;
+          return ListView.builder(
+            itemCount: posts.length,
+            itemBuilder: (context, index) {
+              final post = posts[index];
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: ListTile(
+                  title: Text(
+                    post['title'] ?? '',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  subtitle: Text(
+                    post['content'] ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        onPressed: () async {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => FormPage(post: post),
                             ),
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit, color: Colors.blue),
-                              onPressed: () async {
-                                final result = await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => FormPage(post: item),
-                                  ),
-                                );
-                                
-                                if (result != null) {
-                                  if (result['id'] != null) {
-                                    await HttpService.updatePost(
-                                      result['id'], 
-                                      result['title'], 
-                                      result['content'], 
-                                      result['category_id']
-                                    );
-                                  } else {
-                                    await HttpService.createPost(
-                                      result['title'], 
-                                      result['content'], 
-                                      result['category_id']
-                                    );
-                                  }
-                                  _fetchPosts();
-                                }
-                              },
+                          );
+
+                          if (result != null && result is Map<String, dynamic> && result.containsKey('id')) {
+                            await HttpService.updatePost(
+                              result['id'],
+                              result['title'],
+                              result['content'],
+                              result['category_id'],
+                            );
+                            _refreshData();
+                          }
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () async {
+                          bool? confirm = await showDialog(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Hapus Artikel'),
+                              content: const Text('Yakin ingin menghapus artikel ini?'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, false),
+                                  child: const Text('Batal'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Hapus', style: TextStyle(color: Colors.red)),
+                                ),
+                              ],
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.red),
-                              onPressed: () => _deletePost(item['id']),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+                          );
+
+                          if (confirm == true) {
+                            await HttpService.deletePost(post['id']);
+                            _refreshData();
+                          }
+                        },
+                      ),
+                    ],
                   ),
                 ),
+              );
+            },
+          );
+        },
+      ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.white,
         onPressed: () async {
           final result = await Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const FormPage()),
+            MaterialPageRoute(
+              builder: (context) => const FormPage(),
+            ),
           );
-          if (result != null) {
+
+          if (result != null && result is Map<String, dynamic>) {
             await HttpService.createPost(
-              result['title'], 
-              result['content'], 
-              result['category_id']
+              result['title'],
+              result['content'],
+              result['category_id'],
             );
-            _fetchPosts();
+            _refreshData();
           }
         },
-        child: const Icon(Icons.add, color: Colors.black),
+        child: const Icon(Icons.add),
       ),
     );
   }
